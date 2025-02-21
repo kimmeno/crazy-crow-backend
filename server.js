@@ -1,51 +1,61 @@
 const express = require('express');
-const fs = require('fs').promises;
-const path = require('path');
+const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*'); // Allow your FTP domain
+    res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
     next();
 });
 
-const highScoresFile = path.join(__dirname, 'highscores.json');
+// Use Render's DATABASE_URL environment variable
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false } // Required for Render's free tier
+});
 
-async function initHighScores() {
-    try {
-        await fs.access(highScoresFile);
-    } catch {
-        await fs.writeFile(highScoresFile, JSON.stringify([]));
+// Test database connection and initialize table on startup
+pool.connect((err, client, release) => {
+    if (err) {
+        console.error('Database connection failed:', err.stack);
+        return;
     }
-}
+    console.log('Connected to PostgreSQL database');
 
-async function loadHighScores() {
-    const data = await fs.readFile(highScoresFile, 'utf8');
-    return JSON.parse(data);
-}
-
-async function saveHighScores(scores) {
-    await fs.writeFile(highScoresFile, JSON.stringify(scores, null, 2));
-}
+    // Create highscores table if it doesn't exist
+    client.query('CREATE TABLE IF NOT EXISTS highscores (id SERIAL PRIMARY KEY, name TEXT, score INTEGER)', (err) => {
+        release(); // Release the client back to the pool
+        if (err) {
+            console.error('Failed to create table:', err.stack);
+        } else {
+            console.log('Highscores table created or already exists');
+        }
+    });
+});
 
 app.get('/highscores', async (req, res) => {
-    const scores = await loadHighScores();
-    res.json(scores);
+    try {
+        const result = await pool.query('SELECT * FROM highscores ORDER BY score DESC');
+        res.json(result.rows);
+    } catch (e) {
+        console.error("Failed to fetch high scores:", e);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 app.post('/highscores', async (req, res) => {
     const { name, score } = req.body;
     if (!name || typeof score !== 'number') return res.status(400).json({ error: 'Invalid data' });
-    const scores = await loadHighScores();
-    scores.push({ name, score });
-    scores.sort((a, b) => b.score - a.score);
-    const topScores = scores.slice(0, 10); // Top 10
-    await saveHighScores(topScores);
-    res.status(200).json(topScores);
+    try {
+        await pool.query('INSERT INTO highscores (name, score) VALUES ($1, $2)', [name, score]);
+        const result = await pool.query('SELECT * FROM highscores ORDER BY score DESC');
+        res.status(200).json(result.rows);
+    } catch (e) {
+        console.error("Failed to post score:", e);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
-initHighScores().then(() => {
-    app.listen(port, () => console.log(`Server running on port ${port}`));
-});
+app.listen(port, () => console.log(`Server running on port ${port}`));
