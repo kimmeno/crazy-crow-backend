@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
@@ -10,13 +10,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// Use Render's DATABASE_URL environment variable
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false } // Required for Render's free tier
+    ssl: { rejectUnauthorized: false }
 });
 
-// Test database connection and initialize table on startup
 pool.connect((err, client, release) => {
     if (err) {
         console.error('Database connection failed:', err.stack);
@@ -24,9 +22,8 @@ pool.connect((err, client, release) => {
     }
     console.log('Connected to PostgreSQL database');
 
-    // Create highscores table if it doesn't exist
     client.query('CREATE TABLE IF NOT EXISTS highscores (id SERIAL PRIMARY KEY, name TEXT, score INTEGER)', (err) => {
-        release(); // Release the client back to the pool
+        release();
         if (err) {
             console.error('Failed to create table:', err.stack);
         } else {
